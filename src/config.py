@@ -1,7 +1,6 @@
 import argparse
 import torch
 
-
 MODE_GAN    = 0
 MODE_CYCLIC = 1
 
@@ -12,7 +11,7 @@ RUN_DUMP  = 2
 def parse_args():
     parser = argparse.ArgumentParser(description='PIONEER')
     parser.add_argument('--train_path', type=str, help='training dataset root directory or H5 file')
-    parser.add_argument('--test_path', type=str, help='testing dataset root director or H5 file')
+    parser.add_argument('--test_path', type=str, default=None, help='testing dataset root directory or H5 file')
     parser.add_argument('--aux_inpath', type=str, default=None, help='Input path of specified dataset to reconstruct or interpolate for')
     parser.add_argument('--aux_outpath', type=str, default=None, help='Output path of specified dataset to reconstruct or interpolate for')
     parser.add_argument('--testonly', action='store_true', help='Run in test mode. Quit after the tests.')
@@ -54,7 +53,7 @@ def parse_args():
     parser.add_argument('--dump_trainingset_N', type=int, default=0)
     parser.add_argument('--dump_trainingset_dir', type=str, default='.')
     parser.add_argument('--interpolate_N', type=int, default=0, help='Carry out the given number of interpolation runs (between 4 input images)')
-    parser.add_argument('--reconstructions_N', type=int, default=16, help='The number of reconstructions to run')
+    parser.add_argument('--reconstructions_N', type=int, default=0, help='The number of reconstructions to run')
     parser.add_argument('--sample_N', type=int, default=128, help='The number of random samples to run')
 
     return parser.parse_args()
@@ -78,7 +77,8 @@ def init():
 
     assert(args.run_mode != RUN_DUMP  or args.dump_trainingset_dir)
     assert(args.run_mode != RUN_TRAIN or (args.train_path and args.test_path))
-    assert(args.run_mode != RUN_TEST  or args.test_path or args.aux_inpath)
+    # Test path or aux test path is needed if we run tests other than just random-sampling
+    assert(args.run_mode != RUN_TEST  or args.test_path or args.aux_inpath or (args.interpolate_N <=0 and args.reconstructions_N <=0 and args.sample_N > 0))
 
     assert(args.step_offset != 0 or args.phase_offset == 0)
 
@@ -96,11 +96,11 @@ def init():
     args.use_loss_z_reco    = True
     args.use_loss_KL_z      = True
 
-    args.match_x = 1 #1 #"for fine-tuning, put 15" ( https://github.com/DmitryUlyanov/AGE )
-    args.match_z = 100 #1
-    args.fake_D_KL_scale = 0.1 #0.01
+    args.match_x = 1
+    args.match_z = 100
+    args.fake_D_KL_scale = 0.1
     args.fake_G_KL_scale = args.fake_D_KL_scale
-    args.real_x_KL_scale = 0.1 #1.0
+    args.real_x_KL_scale = 0.1
 
     args.use_TB = not args.no_TB
 
@@ -116,7 +116,7 @@ def init():
     # TODO: Separate the celebaHQ-specific configuration: images_per_stage + img buffer size
 
     if args.images_per_stage == -1:
-        args.images_per_stage = 2400e3 #if args.data != 'celebaHQ' else 4800e3
+        args.images_per_stage = 2400e3 if args.data != 'celebaHQ' else 4800e3
 
     if args.max_phase == -1:
         if args.data == 'celebaHQ':
@@ -133,11 +133,10 @@ def init():
     args.h5 = (args.data == 'celebaHQ')
 
     args.gpu_count = torch.cuda.device_count() # Set to 1 manually if don't want multi-GPU support
-    # TODO Add async=(args.gpu_count>1) to all cuda() calls (PyTorch 0.3) or non_blocking=(args.gpu_count>1) (PyTorch 0.4)
 
     print(args)
 
-    print("Total training samples {}. Max phase for dataset {} is {}. Once the maximum phase is trained the full round, we continue training that phase.".format(args.total_kimg, args.data, args.max_phase))
+    print("Total training samples {}k. Max phase for dataset {} is {}. Once the maximum phase is trained the full round, we continue training that phase.".format(args.total_kimg, args.data, args.max_phase))
    
 
 def get_config():

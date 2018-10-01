@@ -232,15 +232,11 @@ class KLN01Loss(torch.nn.Module): #Adapted from https://github.com/DmitryUlyanov
         samples_var = self.samples_var
 
         if self.direction == 'pq':
-            # mu_1 = 0; sigma_1 = 1
-
             t1 = (1 + samples_mean.pow(2)) / (2 * samples_var.pow(2))
             t2 = samples_var.log()
 
             KL = (t1 + t2 - 0.5).mean()
         else:
-            # mu_2 = 0; sigma_2 = 1
-
             # In the AGE implementation, there is samples_var^2 instead of samples_var^1
             t1 = (samples_var + samples_mean.pow(2)) / 2
             # In the AGE implementation, this did not have the 0.5 scaling factor:
@@ -555,10 +551,15 @@ def main():
 
     if args.train_path:
         train_data_loader = data.get_loader(args.data, args.train_path)
+    else:
+        train_data_loader = None
+    
     if args.test_path:
         test_data_loader = data.get_loader(args.data, args.test_path)
     elif args.aux_inpath:
         test_data_loader = data.get_loader(args.data, args.aux_inpath)
+    else:
+        test_data_loader = None
 
     # 4 modes: Train (with data/train), test (with data/test), aux-test (with custom aux_inpath), dump-training-set
     
@@ -568,7 +569,8 @@ def main():
             total_steps = args.total_kimg * 1000,
             train_mode = args.train_mode)
     elif args.run_mode == config.RUN_TEST:
-        evaluate.Utils.reconstruction_dryrun(session.generator, session.encoder, test_data_loader, session=session)
+        if args.reconstructions_N > 0 or args.interpolate_N > 0:
+            evaluate.Utils.reconstruction_dryrun(session.generator, session.encoder, test_data_loader, session=session)
         evaluate.tests_run(session.generator, session.encoder, test_data_loader, session=session, writer=writer)
     elif args.run_mode == config.RUN_DUMP:
         session.phase = args.start_phase
