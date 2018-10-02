@@ -3,9 +3,8 @@
 ![input 1](samples/interpolations_5_480003_1.0_orig_0.png)
 ...
 ![](samples/interpolations_5_480003_1.0_0x0.png)
-![](samples/interpolations_5_480003_1.0_0x1.png)
-![](samples/interpolations_5_480003_1.0_0x3.png)
-![](samples/interpolations_5_480003_1.0_0x5.png)
+![](samples/interpolations_5_480003_1.0_0x2.png)
+![](samples/interpolations_5_480003_1.0_0x4.png)
 ![](samples/interpolations_5_480003_1.0_0x7.png)
 ...
 ![input 2](samples/interpolations_5_480003_1.0_orig_1.png)
@@ -13,9 +12,8 @@
 ![input 3](samples/interpolations_5_480003_1.0_orig_2.png)
 ...
 ![](samples/interpolations_5_480003_1.0_7x0.png)
-![](samples/interpolations_5_480003_1.0_7x1.png)
-![](samples/interpolations_5_480003_1.0_7x3.png)
-![](samples/interpolations_5_480003_1.0_7x5.png)
+![](samples/interpolations_5_480003_1.0_7x2.png)
+![](samples/interpolations_5_480003_1.0_7x4.png)
 ![](samples/interpolations_5_480003_1.0_7x7.png)
 ...
 ![input 4](samples/interpolations_5_480003_1.0_orig_3.png)
