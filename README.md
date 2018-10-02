@@ -4,11 +4,8 @@
 ...
 ![](samples/interpolations_5_480003_1.0_0x0.png)
 ![](samples/interpolations_5_480003_1.0_0x1.png)
-![](samples/interpolations_5_480003_1.0_0x2.png)
 ![](samples/interpolations_5_480003_1.0_0x3.png)
-![](samples/interpolations_5_480003_1.0_0x4.png)
 ![](samples/interpolations_5_480003_1.0_0x5.png)
-![](samples/interpolations_5_480003_1.0_0x6.png)
 ![](samples/interpolations_5_480003_1.0_0x7.png)
 ...
 ![input 2](samples/interpolations_5_480003_1.0_orig_1.png)
@@ -17,11 +14,8 @@
 ...
 ![](samples/interpolations_5_480003_1.0_7x0.png)
 ![](samples/interpolations_5_480003_1.0_7x1.png)
-![](samples/interpolations_5_480003_1.0_7x2.png)
 ![](samples/interpolations_5_480003_1.0_7x3.png)
-![](samples/interpolations_5_480003_1.0_7x4.png)
 ![](samples/interpolations_5_480003_1.0_7x5.png)
-![](samples/interpolations_5_480003_1.0_7x6.png)
 ![](samples/interpolations_5_480003_1.0_7x7.png)
 ...
 ![input 4](samples/interpolations_5_480003_1.0_orig_3.png)
@@ -59,7 +53,7 @@ For detailed Python package configuration used, see requirements.txt.
 python train.py -d celeba --save_dir celeba64_quicktest --train_path /data/celeba --test_path /data/celeba --sample_N=128 --reconstructions_N=10 --interpolate_N=3 --max_phase=4 --total_kimg=512
 
 # 3. Wait 5-10 minutes (on P100 or equivalent).
-# 4. Done. Now, celeba64_quicktest/reconstructions* files should seem to have learned fairly precise reproduction of face images - at 4x4 resolution. The image at (row 1, col 1) a source image; image at (row 1, col 2) is its reconstruction; image at (row 1, col 3) is the next source image, etc.)
+# 4. Done. Now, celeba64_quicktest/reconstructions* files should seem to have learned fairly precise reproduction of face images - at 4x4 resolution. The image at (row 1, col 1) is the 1st source image; image at (row 1, col 2) is its reconstruction; image at (row 1, col 3) is the next source image, etc.)
 ```
 
 ## Known issues:
@@ -68,7 +62,7 @@ The memory management has known issues which will be fixed on the forthcoming Py
 
 Note that all loss function hyper-parameters in the code base are scaled by a factor of 0.1 in comparison to the paper.
 
-Random sampling should work on all datasets. But, as in the paper, reconstructions and interpolations can be expected to work only in CelebA-64 and 128 (not even CelebA-HQ). There is a theory of what causes these, and the fix is work-in-progress.
+Random sampling should work on all datasets. But, as in the paper, reconstructions and interpolations can be expected to work only in CelebA-64 and 128 (not even CelebA-HQ). There is a theory of what needs to be fixed; work-in-progress.
 
 Training of CelebA is very stable, but with other datasets, unstable outcomes are not impossible (requiring restart). If you see consistently unstable training for a network (more than 50% of the time) despite following the instructions here, please contact us.
 
@@ -81,14 +75,14 @@ Supported datasets are:
     - Used as normal. Please bear in mind the very long time on first run of any LSUN usage to just build the index (many hours).
 - CIFAR-10
 - CelebA-HQ
-    You need to put the dataset in H5 format for PyTorch, separately for training and testing, as follows:
-    1) Download the CelebA dataset (originals, NOT the aligned & cropped one)
-    2) Download the Delta files from the author https://github.com/tkarras/progressive_growing_of_gans (see "Data files needed to reconstruct the CelebA-HQ dataset")
-    3) Run the dataset-tools/h5tool.py we provide (which contains the train/test split unlike the original CelebA-HQ script). For the syntax, run
-    ```
-    python h5tool.py -h
-    ```
-    Please run first data_split=train, then data_split=test. This will create a separate 27k/3k split for training and testing.
+    - You need to put the dataset in H5 format for PyTorch, separately for training and testing, as follows:
+        1) Download the CelebA dataset (originals, NOT the aligned & cropped one)
+        2) Download the Delta files from the author https://github.com/tkarras/progressive_growing_of_gans (see "Data files needed to reconstruct the CelebA-HQ dataset")
+        3) Run the dataset-tools/h5tool.py we provide (which contains the train/test split unlike the original CelebA-HQ script). For the syntax, run
+            ```
+            python h5tool.py -h
+            ```
+        Please run first `data_split=train`, then `data_split=test`. This will create a separate 27k/3k split for training and testing.
 
 ## Dependencies
 ```
@@ -107,13 +101,13 @@ For all command-line arguments, run
 python train.py -h
 ```
 
-Below, samples for typical use cases are given. For other arguments, the defaults should be fine.
+Below, examples for typical use cases are given. For other arguments, the defaults should be fine.
 
 To resume training from a checkpoint, it is sufficient to add `--start_iteration==N` where N is the step number of your latest state file (eg. for `checkpoint/256000_state`, N=256000)
 
 ## Testing
 
-You can test trained models by giving the directory as `save_dir`. The checkpoints are saved under `[save_dir]/checkpoint`.
+You can test trained models by giving its directory as `save_dir`. The checkpoints are saved under `[save_dir]/checkpoint`.
 All examples show a sample checkpoint step count in the `start_iteration` argument.
 
 ### Intermediate samples, reconstructions and interpolations from separate datasets and models:
@@ -186,12 +180,12 @@ python train.py -d celebaHQ --dump_trainingset_N=20 --dump_trainingset_dir=ref25
 
 ## Training up to a specific resolution
 
-The maximum resolution is defined via the max_phase argument, in powers of 2, as follows:
-0 = 4x4
-...
-3 = 32x32
-4 = 64x64
-5 = 128x128
+The maximum resolution is defined via the `max_phase` argument, in powers of 2, as follows:
+0 = 4x4,
+...,
+3 = 32x32,
+4 = 64x64,
+5 = 128x128,
 6 = 256x256
 
 
@@ -210,13 +204,13 @@ python train.py -d celebaHQ --save_dir celebaHQ_quicktest --train_path /data/cel
 python train.py -d cifar10 --save_dir cifar32-0817 --train_path=~/data/cifar10 --test_path=~/data/cifar10 --total_kimg=35000 --max_phase=3 --no_TB --no_progression --total_kimg=15400
 ```
 
-When the progressive training is disabled, your kimg counter starts from where the normal count would have been if the progressive training would be ON. Hence, if the counter would be at, say, 8400 kimg, and you wish to train for 7000 kimg, then use `--total_kimg=15400`.
+When the progressive training is disabled, your kimg counter starts from where the normal count would have been if the progressive training would be ON. Hence, if the counter would initially be at, say, 8400 kimg, and you wish to actually train for 7000 kimg, then use `--total_kimg=15400`.
 
 Note: The model is not optimized for CIFAR training, and the nature of the dataset makes it less stable to train in this setup than the other datasets. You may have to take the best intermediate training result rather than the last one.
 
 ## Continue training a pre-trained model with custom schedule
 
-Normally, a model is given a max_phase (eg. phase 4, 64x64), trained until that phase, and then the training continues until convergence.
+Normally, a model is given a `max_phase` (eg. phase 4, 64x64), trained until that phase, and then the training continues until convergence.
 Then, if you wish to use this model as a pre-trained model for the next phase (e.g. phase 5, 128x128), then you must run the training script with the following extra information:
 ```
 --step_offset=[ the number of steps taken on previous runs ]
@@ -232,26 +226,25 @@ python train.py -d celeba --save_dir celeba128_final --train_path ~/data/celeba 
 ```
 
 At the start of each training session, the actual alpha and phase are calculated as:
+```
 phase = floor((step - step_offset) / images_per_stage) + phase_offset
 alpha = max(1.0, (step - step_offset) / images_per_stage)
+```
 
-Thus, if you already have steps >= step_offset + images_per_stage, and then you restart training, you no longer need to give the phase_offset.
+Thus, if you already have steps >= step_offset + images_per_stage, and then you restart training, you no longer should give the phase_offset.
 
 This could easily happen if you do the final phase of training in several sessions.
 In these advanced scenarios, it is recommended to double-check that the script reports the correct step count, phase and alpha when the training session starts.
 
 ## Misc
 
-The code base also supports regular Progressive Growing of GANs as in [5], confirmed to work up to 128x128 resolution.
+The code base also supports regular Progressive Growing of GANs as in [5], confirmed to work up to 128x128 resolution. This needs to be manually switched on in config.py by setting `args.train_mode = MODE_GAN`.
 
 ## Support
 
 For all correspondence, please contact ari.heljakka@aalto.fi.
 
-*We cannot promise any support nor even to reply to every email.*
-
-However, we appreciate all feedback and will look into every email and issue report.
-For all useful input, we will do our best to reply back.
+Support and email replies are not always guaranteed, but we will appreciate and evaluate all feedback.
 
 ## References
 
@@ -263,7 +256,7 @@ For all useful input, we will do our best to reply back.
 
 [4] https://github.com/tkarras/progressive_growing_of_gans
 
-[5] Karras, T. and Aila, T. and Laine, S. and Lehtinen, J.: Progressive growing of {GAN}s for improved quality, stability, and variation. In: International Conference on Learning Representations (ICLR), 2018.
+[5] Karras, T. and Aila, T. and Laine, S. and Lehtinen, J.: Progressive growing of GANs for improved quality, stability, and variation. In: International Conference on Learning Representations (ICLR), 2018.
 
 ## License
 
