@@ -42,6 +42,11 @@ The batch sizes have been selected to enable running on 12 GB of GPU memory. Onl
 For detailed Python package configuration used, see requirements.txt.
 
 
+## Pre-trained models
+
+[Pre-trained models](https://zenodo.org/record/1455188) can be downloaded from Zenodo for each dataset and resolution target.
+You can run them on command line with the [usage](#usage) examples below, inserting the proper dataset name (e.g. '-d celeba'), path name (e.g. '--save_dir CelebA-128') and checkpoint ID (e.g. '--start_iteration=36200000').
+
 ## Quick start
 ```
 # 1. Download the CelebA (aligned, cropped) dataset (remember to separate the train/test later).
@@ -56,7 +61,7 @@ python train.py -d celeba --save_dir celeba64_quicktest --train_path /data/celeb
 
 ## Known issues:
 
-[Update 2018-10-22] Multi-GPU training has suffered from the [PyTorch bug 12671](https://github.com/pytorch/pytorch/issues/12671). We have a fix that probably resolves the issue, but before we released it, the bug was officially closed in the PyTorch repository by another independent fix. However, even in the presence of the bug, the results of the paper *can* be reproduced.
+[Update 2018-10-22] Multi-GPU training has suffered from the [PyTorch bug 12671](https://github.com/pytorch/pytorch/issues/12671). We have a [hotfix](https://gist.github.com/heljakka/ff8e0cd97da8ccf06c7973c06d5fe82e) that resolves the issue, but before we released it, the bug was officially closed in the PyTorch repository by another independent fix. However, even in the presence of the bug, the results of the paper *can* be reproduced. Our hotfix has been confirmed to give you improved results with multi-GPU setup. (We have not confirmed the effects of the official fix.)
 
 The memory management has known issues which will be fixed on the forthcoming PyTorch 0.4 update. If you enable training-time samples, it can produce out-of-memory crashes on higher resolutions. If so, please try removing all training-time tests (`--sample_N=0 --interpolate_N=0 --reconstructions_N=0`).
 
