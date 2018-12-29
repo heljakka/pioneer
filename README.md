@@ -206,7 +206,7 @@ python train.py -d celebaHQ --save_dir celebaHQ_quicktest --train_path /data/cel
 
 3. Cifar-10, 32x32, no progression:
 ```
-python train.py -d cifar10 --save_dir cifar32-0817 --train_path=~/data/cifar10 --test_path=~/data/cifar10 --total_kimg=35000 --max_phase=3 --no_TB --no_progression --total_kimg=15400
+python train.py -d cifar10 --save_dir cifar32-0817 --train_path=~/data/cifar10 --test_path=~/data/cifar10 --total_kimg=35000 --max_phase=3 --no_TB --no_progression
 ```
 
 When the progressive training is disabled, your kimg counter starts from where the normal count would have been if the progressive training would be ON. Hence, if the counter would initially be at, say, 8400 kimg, and you wish to actually train for 7000 kimg, then use `--total_kimg=15400`.
