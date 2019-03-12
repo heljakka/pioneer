@@ -3,27 +3,26 @@ from PIL import Image
 from tqdm import tqdm
 
 import torch
-from torch import nn, optim
+from torch import optim
 from torch.autograd import Variable, grad
 from torchvision import utils
 
-from model import Generator, Discriminator
+from src.model import Generator, Discriminator
 
 from datetime import datetime
 import random
-import copy
 
-import os
-
-import config
-import utils
-import data
-import evaluate
+from src import config
+from src import utils
+from src import data
+from src import evaluate
 
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
 
 from torch.nn import functional as F
+
+from src.sessions import Session
 
 args   = config.get_config()
 writer = None
@@ -49,97 +48,9 @@ def batch_size(reso):
 def batch_size_by_phase(phase):
     return batch_size(4 * 2 ** phase)
 
-class Session:
-    def __init__(self):
-        # Note: 4 requirements for sampling from pre-existing models:
-        # 1) Ensure you save and load both multi-gpu versions (DataParallel) or both not.
-        # 2) Ensure you set the same phase value as the pre-existing model and that your local and global alpha=1.0 are set
-        # 3) Sample from the g_running, not from the latest generator
-        # 4) You may need to warm up the g_running by running evaluate.reconstruction_dryrun() first
-
-        self.alpha = -1
-        self.sample_i = min(args.start_iteration, 0)
-        self.phase = args.start_phase
-
-        self.generator = nn.DataParallel( Generator(args.nz+1, args.n_label).cuda() )
-        self.g_running = nn.DataParallel( Generator(args.nz+1, args.n_label).cuda() )
-        self.encoder   = nn.DataParallel( Discriminator(nz = args.nz+1, n_label = args.n_label, binary_predictor = args.train_mode == config.MODE_GAN).cuda() )
-
-        print("Using ", torch.cuda.device_count(), " GPUs!")
-
-        self.reset_opt()
-
-        print('Session created.')
-
-    def reset_opt(self):
-        self.optimizerG = optim.Adam(self.generator.parameters(), args.lr, betas=(0.0, 0.99))
-        self.optimizerD = optim.Adam(self.encoder.parameters(), args.lr, betas=(0.0, 0.99)) # includes all the encoder parameters...
-
-    def save_all(self, path):
-        torch.save({'G_state_dict': self.generator.state_dict(),
-                    'D_state_dict': self.encoder.state_dict(),
-                    'G_running_state_dict': self.g_running.state_dict(),
-                    'optimizerD': self.optimizerD.state_dict(),
-                    'optimizerG': self.optimizerG.state_dict(),
-                    'iteration': self.sample_i,
-                    'phase': self.phase,
-                    'alpha': self.alpha},
-                path)
-
-    def load(self, path):
-        checkpoint = torch.load(path)
-        self.sample_i = int(checkpoint['iteration'])
-        
-        self.generator.load_state_dict(checkpoint['G_state_dict'])
-        self.g_running.load_state_dict(checkpoint['G_running_state_dict'])
-        self.encoder.load_state_dict(checkpoint['D_state_dict'])
-
-        if args.reset_optimizers <= 0:
-            self.optimizerD.load_state_dict(checkpoint['optimizerD'])
-            self.optimizerG.load_state_dict(checkpoint['optimizerG'])
-            print("Reloaded old optimizers")
-        else:
-            print("Despite loading the state, we reset the optimizers.")
-
-        self.alpha = checkpoint['alpha']
-        self.phase = int(checkpoint['phase'])
-        if args.start_phase > 0: #If the start phase has been manually set, try to actually use it (e.g. when have trained 64x64 for extra rounds and then turning the model over to 128x128)
-            self.phase = min(args.start_phase, self.phase)
-            print("Use start phase: {}".format(self.phase))
-        if self.phase > args.max_phase:
-            print('Warning! Loaded model claimed phase {} but max_phase={}'.format(self.phase, args.max_phase))
-            self.phase = args.max_phase
-
-    def create(self):
-        if args.start_iteration <= 0:
-            args.start_iteration = 1
-            if args.no_progression:
-                self.sample_i = args.start_iteration = int( (args.max_phase + 0.5) * args.images_per_stage ) # Start after the fade-in stage of the last iteration
-                args.force_alpha = 1.0
-                print("Progressive growth disabled. Setting start step = {} and alpha = {}".format(args.start_iteration, args.force_alpha))
-        else:
-            reload_from = '{}/checkpoint/{}_state'.format(args.save_dir, str(args.start_iteration).zfill(6)) #e.g. '604000' #'600000' #latest'   
-            print(reload_from)
-            if os.path.exists(reload_from):
-                self.load(reload_from)
-                print("Loaded {}".format(reload_from))
-                print("Iteration asked {} and got {}".format(args.start_iteration, self.sample_i))               
-
-                if args.testonly:
-                    self.generator = copy.deepcopy(self.g_running)
-            else:
-                assert(not args.testonly)
-                self.sample_i = args.start_iteration
-                print('Start from iteration {}'.format(self.sample_i))
-
-        self.g_running.train(False)
-
-        if args.force_alpha >= 0.0:
-            self.alpha = args.force_alpha
-
-        accumulate(self.g_running, self.generator, 0)
-
 def setup():
+    config.init()
+
     utils.make_dirs()
     if not args.testonly:
         config.log_args(args)
@@ -156,16 +67,9 @@ def setup():
     torch.manual_seed(args.manual_seed)
     torch.cuda.manual_seed_all(args.manual_seed)   
 
-def accumulate(model1, model2, decay=0.999):
-    par1 = dict(model1.named_parameters())
-    par2 = dict(model2.named_parameters())
-
-    for k in par1.keys():
-        par1[k].data.mul_(decay).add_(1 - decay, par2[k].data)
-
 def get_grad_penalty(discriminator, real_image, fake_image, step, alpha):
     """ Used in WGAN-GP version only. """
-    eps = torch.rand(batch_size_by_phase(step), 1, 1, 1).cuda()
+    eps = torch.rand(batch_size_by_phase(step), 1, 1, 1, device=args.device)
 
     if eps.size(0) != real_image.size(0) or eps.size(0) != fake_image.size(0):
         # If end-of-batch situation, we restrict other vectors to matcht the number of training images available.
@@ -200,11 +104,10 @@ def D_prediction_of_G_output(generator, encoder, step, alpha):
     #                    torch.multinomial(
     #                        torch.ones(args.n_label), args.batch_size, replacement=True)).cuda()
 
-    myz = Variable(torch.randn(batch_size_by_phase(step), args.nz)).cuda(async=(args.gpu_count>1))
+    myz = Variable(torch.randn(batch_size_by_phase(step), args.nz), device=args.device)
     myz = utils.normalize(myz)
-    myz, label = utils.split_labels_out_of_latent(myz)
 
-    fake_image = generator(myz, label, step, alpha)
+    fake_image = generator(myz, None, step, alpha)
     fake_predict, _ = encoder(fake_image, step, alpha, args.use_ALQ)
 
     loss = fake_predict.mean()
@@ -248,6 +151,124 @@ class KLN01Loss(torch.nn.Module): #Adapted from https://github.com/DmitryUlyanov
             KL *= -1
 
         return KL
+
+def encoder_train(session, real_image, generatedImagePool, batch_N, match_x, stats, kls):
+    encoder = session.encoder
+    generator = session.generator
+
+    encoder.zero_grad()
+
+    x = Variable(real_image, device=args.device) #async=(args.gpu_count>1))
+    KL_maximizer = KLN01Loss(direction=args.KL, minimize=False)
+    KL_minimizer = KLN01Loss(direction=args.KL, minimize=True)
+
+    e_losses = []
+
+    real_z = encoder(x, session.phase, session.alpha, args.use_ALQ)
+
+    if args.use_real_x_KL:
+        # KL_real: - \Delta( e(X) , Z ) -> max_e
+        KL_real = KL_minimizer(real_z) * args.real_x_KL_scale
+        e_losses.append(KL_real)
+
+        stats['real_mean'] = KL_minimizer.samples_mean.data.mean()
+        stats['real_var'] = KL_minimizer.samples_var.data.mean()
+        stats['KL_real'] = KL_real.data.item()
+        kls = "{0:.3f}".format(stats['KL_real'])
+
+    recon_x = generator(real_z, None, session.phase, session.alpha)
+    if args.use_loss_x_reco:
+        # match_x: E_x||g(e(x)) - x|| -> min_e
+        err = utils.mismatch(recon_x, x, args.match_x_metric) * match_x
+        e_losses.append(err)
+        stats['x_reconstruction_error'] = err.data.item()
+
+    args.use_wpgan_grad_penalty = False
+    grad_penalty = 0.0
+    
+    if args.use_loss_fake_D_KL:
+        # TODO: The following codeblock is essentially the same as the KL_minimizer part on G side. Unify
+
+        z = Variable( torch.FloatTensor(batch_N, args.nz, 1, 1), device=args.device)
+        utils.populate_z(z, args.nz+args.n_label, args.noise, batch_N)
+        
+        with torch.no_grad():
+            fake = generator(z, None, session.phase, session.alpha)
+
+        if session.alpha >= 1.0:
+            fake = generatedImagePool.query(fake.data)
+
+        fake.requires_grad_()
+
+        # e(g(Z))
+        egz = encoder(fake, session.phase, session.alpha, args.use_ALQ)
+
+        # KL_fake: \Delta( e(g(Z)) , Z ) -> max_e
+        KL_fake = KL_maximizer(egz) * args.fake_D_KL_scale
+        e_losses.append(KL_fake)
+
+        stats['fake_mean'] = KL_maximizer.samples_mean.data.mean()
+        stats['fake_var'] = KL_maximizer.samples_var.data.mean()
+        stats['KL_fake'] = -KL_fake.data.item()
+        kls = "{0}/{1:.3f}".format(kls, stats['KL_fake'])
+
+        if args.use_wpgan_grad_penalty:
+            grad_penalty = get_grad_penalty(encoder, x, fake, session.phase, session.alpha)
+
+    # Update e
+    if len(e_losses) > 0:
+        e_loss = sum(e_losses)                
+        stats['E_loss'] = np.float32(e_loss.data)
+        e_loss.backward()
+
+        if args.use_wpgan_grad_penalty:
+            grad_penalty.backward()
+            stats['Grad_penalty'] = grad_penalty.data
+
+    session.optimizerD.step()
+
+    return kls
+
+def KL_of_encoded_G_output(generator, encoder, z, batch_N, session):
+    KL_minimizer = KLN01Loss(direction=args.KL, minimize=True)
+    utils.populate_z(z, args.nz+args.n_label, args.noise, batch_N)
+    fake = generator(z, None, session.phase, session.alpha)
+    
+    egz = encoder(fake, session.phase, session.alpha, args.use_ALQ)
+    # KL_fake: \Delta( e(g(Z)) , Z ) -> min_g
+    return egz, KL_minimizer(egz) * args.fake_G_KL_scale, z
+
+
+def decoder_train(session, batch_N, stats, kls):
+    session.generator.zero_grad()
+    
+    g_losses = []
+    z = Variable( torch.FloatTensor(batch_N, args.nz, 1, 1), device=args.device)
+
+    egz, kl, z = KL_of_encoded_G_output(session.generator, session.encoder, z, batch_N, session)
+
+    if args.use_loss_KL_z:
+        g_losses.append(kl) # G minimizes this KL
+        stats['KL(Phi(G))'] = kl.data.item()
+        kls = "{0}/{1:.3f}".format(kls, stats['KL(Phi(G))'])
+
+    if args.use_loss_z_reco:
+        z_diff = utils.mismatch(egz, z, args.match_z_metric) * args.match_z # G tries to make the original z and encoded z match
+        g_losses.append(z_diff)                
+
+    if len(g_losses) > 0:
+        loss = sum(g_losses)
+        stats['G_loss'] = np.float32(loss.data)
+        loss.backward()
+    
+    session.optimizerG.step()
+
+    if args.train_mode == config.MODE_CYCLIC:
+        if args.use_loss_z_reco:
+            stats['z_reconstruction_error'] = z_diff.data.item()
+
+    return kls
+
 
 def train(generator, encoder, g_running, train_data_loader, test_data_loader, session, total_steps, train_mode):
     pbar = tqdm(initial=session.sample_i, total = total_steps)
@@ -329,14 +350,8 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             print('Image pool created with size {} because reso is {}'.format(imagePoolSize, reso))
 
         ####################### Training init ####################### 
-
-        z = Variable( torch.FloatTensor(batch_size(reso), args.nz, 1, 1) ).cuda(async=(args.gpu_count>1))
-        KL_minimizer = KLN01Loss(direction=args.KL, minimize=True)
-        KL_maximizer = KLN01Loss(direction=args.KL, minimize=False)
-        
+             
         stats = {}
-
-        one = torch.FloatTensor([1]).cuda(async=(args.gpu_count>1))
 
         try:
             real_image, _ = next(train_dataset)              
@@ -347,12 +362,13 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
         ####################### DISCRIMINATOR / ENCODER ###########################
 
         utils.switch_grad_updates_to_first_of(encoder, generator)
-        encoder.zero_grad()
-
-        x = Variable(real_image).cuda(async=(args.gpu_count>1))
         kls = ""
+
         if train_mode == config.MODE_GAN:
-            
+            one = torch.FloatTensor([1], device=args.device)
+            x = Variable(real_image, device=args.device)
+            encoder.zero_grad()
+
             # Discriminator for real samples
             real_predict, _ = encoder(x, session.phase, session.alpha, args.use_ALQ)
             real_predict = real_predict.mean() \
@@ -369,131 +385,30 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
             grad_penalty = get_grad_penalty(encoder, x, fake_image, session.phase, session.alpha)
             grad_penalty.backward()
 
+            del x, one
+
         elif train_mode == config.MODE_CYCLIC:
-            e_losses = []
-
-            # e(X)
-            
-            real_z = encoder(x, session.phase, session.alpha, args.use_ALQ)
-            if args.use_real_x_KL:
-                # KL_real: - \Delta( e(X) , Z ) -> max_e
-                KL_real = KL_minimizer(real_z) * args.real_x_KL_scale
-                e_losses.append(KL_real)
-
-                stats['real_mean'] = KL_minimizer.samples_mean.data.mean()
-                stats['real_var'] = KL_minimizer.samples_var.data.mean()
-                stats['KL_real'] = KL_real.data[0]
-                kls = "{0:.3f}".format(stats['KL_real'])
-
-            # The final entries are the label. Normal case, just 1. Extract it/them, and make it [b x 1]:
-
-            real_z, label = utils.split_labels_out_of_latent(real_z)
-            recon_x = generator(real_z, label, session.phase, session.alpha)
-            if args.use_loss_x_reco:
-                # match_x: E_x||g(e(x)) - x|| -> min_e
-                err = utils.mismatch(recon_x, x, args.match_x_metric) * match_x
-                e_losses.append(err)
-                stats['x_reconstruction_error'] = err.data[0]
-
-            args.use_wpgan_grad_penalty = False
-            grad_penalty = 0.0
-            
-            if args.use_loss_fake_D_KL:
-                # TODO: The following codeblock is essentially the same as the KL_minimizer part on G side. Unify
-                utils.populate_z(z, args.nz+args.n_label, args.noise, batch_size(reso))
-                z, label = utils.split_labels_out_of_latent(z)
-                fake = generator(z, label, session.phase, session.alpha).detach()
-
-                if session.alpha >= 1.0:
-                    fake = generatedImagePool.query(fake.data)
-
-                # e(g(Z))
-                egz = encoder(fake, session.phase, session.alpha, args.use_ALQ)
-
-                # KL_fake: \Delta( e(g(Z)) , Z ) -> max_e
-                KL_fake = KL_maximizer(egz) * args.fake_D_KL_scale
-                e_losses.append(KL_fake)
-
-                stats['fake_mean'] = KL_maximizer.samples_mean.data.mean()
-                stats['fake_var'] = KL_maximizer.samples_var.data.mean()
-                stats['KL_fake'] = -KL_fake.data[0]
-                kls = "{0}/{1:.3f}".format(kls, stats['KL_fake'])
-
-                if args.use_wpgan_grad_penalty:
-                    grad_penalty = get_grad_penalty(encoder, x, fake, session.phase, session.alpha)
-            
-            # Update e
-            if len(e_losses) > 0:
-                e_loss = sum(e_losses)                
-                stats['E_loss'] = np.float32(e_loss.data)
-                e_loss.backward()
-
-                if args.use_wpgan_grad_penalty:
-                    grad_penalty.backward()
-                    stats['Grad_penalty'] = grad_penalty.data
-
-                #book-keeping
-                disc_loss_val = e_loss.data[0]
-
-        session.optimizerD.step()
-
-        torch.cuda.empty_cache()
+            kls = encoder_train(session, real_image, generatedImagePool, batch_size(reso), match_x, stats, kls)
 
         ######################## GENERATOR / DECODER #############################
-        
+
         if (batch_count + 1) % args.n_critic == 0:
             utils.switch_grad_updates_to_first_of(generator, encoder)
-
-            for _ in range(args.n_generator):
-                generator.zero_grad()
-                g_losses = []
-                
+            
+            for _ in range(args.n_generator):               
                 if train_mode == config.MODE_GAN:
+                    generator.zero_grad()
                     fake_predict, _ = D_prediction_of_G_output(generator, encoder, session.phase, session.alpha)
                     loss = -fake_predict
-                    g_losses.append(loss)
-                    
-                elif train_mode == config.MODE_CYCLIC: #TODO We push the z variable around here like idiots
-                    def KL_of_encoded_G_output(generator, z):
-                        utils.populate_z(z, args.nz+args.n_label, args.noise, batch_size(reso))
-                        z, label = utils.split_labels_out_of_latent(z)                        
-                        fake = generator(z, label, session.phase, session.alpha)
-                        
-                        egz = encoder(fake, session.phase, session.alpha, args.use_ALQ)
-                        # KL_fake: \Delta( e(g(Z)) , Z ) -> min_g
-                        return egz, label, KL_minimizer(egz) * args.fake_G_KL_scale, z
-
-                    egz, label, kl, z = KL_of_encoded_G_output(generator, z)
-
-                    if args.use_loss_KL_z:
-                        g_losses.append(kl) # G minimizes this KL
-                        stats['KL(Phi(G))'] = kl.data[0]
-                        kls = "{0}/{1:.3f}".format(kls, stats['KL(Phi(G))'])
-
-                    if args.use_loss_z_reco:
-                        z = torch.cat((z, label), 1)
-                        z_diff = utils.mismatch(egz, z, args.match_z_metric) * args.match_z # G tries to make the original z and encoded z match
-                        g_losses.append(z_diff)                
-
-                if len(g_losses) > 0:
-                    loss = sum(g_losses)
-                    stats['G_loss'] = np.float32(loss.data)
                     loss.backward()
+                    session.optimizerG.step()
+                    
+                elif train_mode == config.MODE_CYCLIC:
+                    kls = decoder_train(session, batch_size(reso), stats, kls)
 
-                    # Book-keeping only:
-                    gen_loss_val = loss.data[0]
-                
-                session.optimizerG.step()
+            utils.accumulate(g_running, generator)
 
-                torch.cuda.empty_cache()
-
-                if train_mode == config.MODE_CYCLIC:
-                    if args.use_loss_z_reco:
-                        stats['z_reconstruction_error'] = z_diff.data[0]
-
-            accumulate(g_running, generator)
-
-            del z, x, one, real_image, real_z, KL_real, label, recon_x, fake, egz, KL_fake, kl, z_diff
+            del real_image
 
             if train_mode == config.MODE_CYCLIC:
                 if args.use_TB:
@@ -525,6 +440,7 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
         if batch_count % args.checkpoint_cycle == 0:
             for postfix in {'latest', str(session.sample_i).zfill(6)}:
                 session.save_all('{}/{}_state'.format(args.checkpoint_dir, postfix))
+                saveSNU('{}/{}_SNU'.format(args.checkpoint_dir, postfix))
 
             print("Checkpointed to {}".format(session.sample_i))
 
@@ -544,6 +460,7 @@ def train(generator, encoder, g_running, train_data_loader, test_data_loader, se
 
 def main():
     setup()
+    print('setup done')
     session = Session()
     session.create()
 
@@ -556,21 +473,17 @@ def main():
     
     if args.test_path:
         test_data_loader = data.get_loader(args.data, args.test_path)
-    elif args.aux_inpath:
-        test_data_loader = data.get_loader(args.data, args.aux_inpath)
     else:
         test_data_loader = None
 
-    # 4 modes: Train (with data/train), test (with data/test), aux-test (with custom aux_inpath), dump-training-set
-    
+    # 3 modes: Train (with data/train), test (with data/test), dump-training-set
+
     if args.run_mode == config.RUN_TRAIN:
         train(session.generator, session.encoder, session.g_running, train_data_loader, test_data_loader,
             session  = session,
             total_steps = args.total_kimg * 1000,
             train_mode = args.train_mode)
     elif args.run_mode == config.RUN_TEST:
-        if args.reconstructions_N > 0 or args.interpolate_N > 0:
-            evaluate.Utils.reconstruction_dryrun(session.generator, session.encoder, test_data_loader, session=session)
         evaluate.tests_run(session.generator, session.encoder, test_data_loader, session=session, writer=writer)
     elif args.run_mode == config.RUN_DUMP:
         session.phase = args.start_phase

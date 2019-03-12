@@ -7,8 +7,8 @@ from torch.autograd import Variable
 
 from math import sqrt
 
-import utils
-import config
+from src import utils
+from src import config
 
 args   = config.get_config()
 
@@ -29,11 +29,13 @@ class SpectralNorm:
 
     def compute_weight(self, module):
         weight = getattr(module, self.name + '_orig')
+
         u = getattr(module, self.name + '_u')
+        
         size = weight.size()
         weight_mat = weight.contiguous().view(size[0], -1)
         if weight_mat.is_cuda:
-            u = u.cuda(async=(args.gpu_count>1))
+            u = u.to(device=args.device)
         v = weight_mat.t() @ u
         v = v / v.norm()
         u = weight_mat @ v
@@ -114,6 +116,7 @@ class PixelNorm(nn.Module):
 
 
 class SpectralNormConv2d(nn.Module):
+    spectral_norm_layers = nn.ModuleList()
     def __init__(self, *args, **kwargs):
         super().__init__()
 
@@ -121,6 +124,8 @@ class SpectralNormConv2d(nn.Module):
         init.kaiming_normal(conv.weight)
         conv.bias.data.zero_()
         self.conv = spectral_norm(conv)
+
+        SpectralNormConv2d.spectral_norm_layers.append(self.conv)
 
     def forward(self, input):
         return self.conv(input)
@@ -226,14 +231,17 @@ class Generator(nn.Module):
         #input = self.code_norm(input)
         # ARI: THis causes internal assertion failure. Maybe we don't need the embedding?
         #label = self.label_embed(label)        
-        
         out_act = lambda x: x #nn.Tanh()
 
-        out = torch.cat([input, label], 1).unsqueeze(2).unsqueeze(3)
+        # Label is reserved for future use. Make None if not in use.
+        if not label is None:
+            input = torch.cat([input, label], 1)
+
+        out = input.unsqueeze(2).unsqueeze(3)
 
         for i, (conv, to_rgb) in enumerate(zip(self.progression, self.to_rgb)):
             if i > 0 and step > 0:
-                upsample = F.upsample(out, scale_factor=2)
+                upsample = F.upsample(out, scale_factor=2) #, mode=('bilinear' if i==step else 'nearest'))
                 out = conv(upsample)
 
             else:
@@ -302,6 +310,7 @@ class Discriminator(nn.Module):
             self.linear = nn.Linear(nz, 1 + n_label)
     c = 0
     def forward(self, input, step, alpha, use_ALQ): #default was step=0, alpha=-1
+
         for i in range(step, -1, -1):
             index = self.n_layer - i - 1
 

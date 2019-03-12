@@ -10,9 +10,9 @@ RUN_DUMP  = 2
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PIONEER')
+    parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--train_path', type=str, help='training dataset root directory or H5 file')
     parser.add_argument('--test_path', type=str, default=None, help='testing dataset root directory or H5 file')
-    parser.add_argument('--aux_inpath', type=str, default=None, help='Input path of specified dataset to reconstruct or interpolate for')
     parser.add_argument('--aux_outpath', type=str, default=None, help='Output path of specified dataset to reconstruct or interpolate for')
     parser.add_argument('--testonly', action='store_true', help='Run in test mode. Quit after the tests.')
     
@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--use_ALQ', type=int, default=0, help='Reserved for future use')
     parser.add_argument('--images_per_stage', type=int, default=-1)
+    parser.add_argument('--no_load_SNU', action='store_true', help='Do not load the U-matrix of spectral normalization, even if available')
     
     parser.add_argument('--matching_phase_x', type=float, default=1.5)
     parser.add_argument('--force_alpha', type=float, default=-1.0)
@@ -48,13 +49,13 @@ def parse_args():
     parser.add_argument('--manual_seed', type=int, default=123)
     parser.add_argument('--no_progression', action='store_true', help='No progressive growth. Set the network to the target size from the beginning. Note that the step count starts from non-zero to make the results comparable.')
 
-
     # Special modes:
     parser.add_argument('--dump_trainingset_N', type=int, default=0)
     parser.add_argument('--dump_trainingset_dir', type=str, default='.')
     parser.add_argument('--interpolate_N', type=int, default=0, help='Carry out the given number of interpolation runs (between 4 input images)')
     parser.add_argument('--reconstructions_N', type=int, default=0, help='The number of reconstructions to run')
     parser.add_argument('--sample_N', type=int, default=128, help='The number of random samples to run')
+    parser.add_argument('--sample_dir', default=None, type=str, help='Evaluation samples storage location')
 
     return parser.parse_args()
 
@@ -78,7 +79,7 @@ def init():
     assert(args.run_mode != RUN_DUMP  or args.dump_trainingset_dir)
     assert(args.run_mode != RUN_TRAIN or (args.train_path and args.test_path))
     # Test path or aux test path is needed if we run tests other than just random-sampling
-    assert(args.run_mode != RUN_TEST  or args.test_path or args.aux_inpath or (args.interpolate_N <=0 and args.reconstructions_N <=0 and args.sample_N > 0))
+    assert(args.run_mode != RUN_TEST  or args.test_path or (args.interpolate_N <=0 and args.reconstructions_N <=0 and args.sample_N > 0))
 
     assert(args.step_offset != 0 or args.phase_offset == 0)
 
@@ -103,6 +104,7 @@ def init():
     args.real_x_KL_scale = 0.1
 
     args.use_TB = not args.no_TB
+    args.load_SNU = not args.no_load_SNU
 
     args.sample_mirroring = True
     if args.testonly:
@@ -116,7 +118,7 @@ def init():
     # TODO: Separate the celebaHQ-specific configuration: images_per_stage + img buffer size
 
     if args.images_per_stage == -1:
-        args.images_per_stage = 2400e3 if args.data != 'celebaHQ' else 4800e3
+        args.images_per_stage = 2400e3 #if args.data != 'celebaHQ' else 4800e3
 
     if args.max_phase == -1:
         if args.data == 'celebaHQ':
@@ -130,18 +132,41 @@ def init():
     if args.total_kimg < 0:
         args.total_kimg = int(args.images_per_stage * (args.max_phase+2)/1000) #All stages once, the last stage trained twice.
 
-    args.h5 = (args.data == 'celebaHQ')
+    args.h5 = args.test_path[-3:] == '.h5'
+    assert(args.data == 'celebaHQ' or not args.h5) #only celebaHQ supports .h5 atm.
 
-    args.gpu_count = torch.cuda.device_count() # Set to 1 manually if don't want multi-GPU support
+    args.gpu_count = torch.cuda.device_count()
+
+    args.device = None
+    if not args.disable_cuda and torch.cuda.is_available():
+        args.device = torch.device('cuda')
+    else:
+        args.device = torch.device('cpu')
 
     print(args)
 
     print("Total training samples {}k. Max phase for dataset {} is {}. Once the maximum phase is trained the full round, we continue training that phase.".format(args.total_kimg, args.data, args.max_phase))
    
+    import os
+    if args.start_iteration==-1:
+        cppath = args.save_dir + '/checkpoint'
+        if os.path.exists(cppath):
+            for filename in os.listdir(cppath):
+                idp = filename.split('_state')
+                if len(idp) > 1 and idp[0] >= '0' and idp[0] <= '9':
+                    print(idp[0])
+                    if int(idp[0]) > args.start_iteration:
+                        args.start_iteration = int(idp[0])
+        else:
+            print('Save directory does not exist. Will create.')
+        if args.start_iteration != -1:
+            print("\nLoading the largest state number {}\n".format(args.start_iteration))
+        else:
+            args.start_iteration = 0
+            print('start_iteration=-1 given which indicates the latest state, but no state found. Starting from step 0.');
 
 def get_config():
     global args
     if args == None:
         args = parse_args()
-        init()
     return args

@@ -8,8 +8,7 @@ import torch
 from torchvision import datasets, transforms, utils
 from torch.utils.data import DataLoader
 
-
-import config
+from src import config
 
 args = config.get_config()
 
@@ -20,7 +19,9 @@ class CelebAHQ():
         self._base_key = 'data'
         print("Try H5 data path {}".format(path))
         self.dataset = h5py.File(path, 'r')
+        
         self._len = {k:len(self.dataset[k]) for k in resolution}
+
         assert all([resol in self.dataset.keys() for resol in resolution])
 
     def __call__(self, batch_size, phase, alpha):
@@ -51,9 +52,13 @@ def get_loader(datasetName, path):
     elif datasetName == 'cifar10':
         loader = Utils.cifar10_loader(path)
     elif datasetName == 'celebaHQ':
-        loader = CelebAHQ(path) # Expects the path that has the .h5 file
+        loader = CelebAHQ(path) if args.h5 else Utils.celeba_loader(path) # CelebaHQ class expects the path that has the .h5 file. Regular celeba_loader does not.
 
     return loader
+
+# This circumvents a Pickle issue in Windows
+def nop(x):
+    return x
 
 class Utils:
     @staticmethod
@@ -91,10 +96,9 @@ class Utils:
 
         return loader
 
-    maybeRandomHorizontalFlip = transforms.RandomHorizontalFlip() if args.sample_mirroring else transforms.Lambda(lambda x: x)
-
     @staticmethod
     def sample_data(dataloader, batch_size, image_size=4):
+        maybeRandomHorizontalFlip = transforms.RandomHorizontalFlip() if args.sample_mirroring else transforms.Lambda(nop)
         if (args.data == 'celebaHQ'):
             while True: #This is an infinite iterator
                 batch = dataloader(batch_size, int(np.log2(image_size / 4)), 0.0)
@@ -111,7 +115,7 @@ class Utils:
                 transforms.Resize(128),
                 transforms.CenterCrop(128),
                 transforms.Resize(image_size),
-                Utils.maybeRandomHorizontalFlip,
+                maybeRandomHorizontalFlip,
                 #transforms.CenterCrop(image_size),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -119,7 +123,7 @@ class Utils:
         elif args.data == 'lsun': # resize to the desired size, then center crop to this LOD size
             transform_with_resize = transforms.Compose([
                 transforms.Resize(image_size),
-                Utils.maybeRandomHorizontalFlip,
+                maybeRandomHorizontalFlip,
                 transforms.CenterCrop(image_size),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -144,7 +148,8 @@ class Utils:
         #TODO Triple-check that image_size can be given this way instead of always calculated from session.step
     @staticmethod
     def sample_data2(dataloader, batch_size, image_size, session):
-        if (args.data == 'celebaHQ'):
+        maybeRandomHorizontalFlip = transforms.RandomHorizontalFlip() if args.sample_mirroring else transforms.Lambda(nop)
+        if args.data == 'celebaHQ' and args.h5:
             while True: #This is an infinite iterator           
                 batch = dataloader(batch_size, session.phase, session.alpha)
                 yield torch.from_numpy(batch), None #no label
@@ -155,27 +160,29 @@ class Utils:
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
-        if args.data == 'celeba':
+        celebaMaxReso = 128 if args.data == 'celeba' else 256
+
+        if args.data == 'celeba' or args.data == 'celebaHQ':
             transform_with_resize_norm = transforms.Compose([
-                transforms.Resize(128),
-                transforms.CenterCrop(128),
+                transforms.Resize(celebaMaxReso),
+                transforms.CenterCrop(celebaMaxReso),
                 transforms.Resize(image_size),
-                Utils.maybeRandomHorizontalFlip,
+                maybeRandomHorizontalFlip,
                 #transforms.CenterCrop(image_size),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
             ])
             transform_with_resize = transforms.Compose([
-                transforms.Resize(128),
-                transforms.CenterCrop(128),
+                transforms.Resize(celebaMaxReso),
+                transforms.CenterCrop(celebaMaxReso),
                 transforms.Resize(image_size),
-                Utils.maybeRandomHorizontalFlip,
+                maybeRandomHorizontalFlip,
                 transforms.ToTensor(),
             ])
         elif args.data == 'lsun':
             transform_with_resize_norm = transforms.Compose([
                 transforms.Resize(image_size),
-                Utils.maybeRandomHorizontalFlip,
+                maybeRandomHorizontalFlip,
                 transforms.CenterCrop(image_size),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -183,7 +190,7 @@ class Utils:
             transform_with_resize = transforms.Compose([
                 transforms.Resize(image_size),
                 transforms.CenterCrop(image_size),
-                Utils.maybeRandomHorizontalFlip,
+                maybeRandomHorizontalFlip,
                 transforms.ToTensor(),
             ])
         elif args.data == 'cifar10': # No center crop, no horizontal flipping

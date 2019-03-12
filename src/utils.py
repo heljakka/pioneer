@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Variable
 
-import config
+from src import config
 import os
 import random
 
@@ -13,7 +13,7 @@ def switch_grad_updates_to_first_of(a,b):
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
-        p.requires_grad = flag
+        p.requires_grad_(flag)
 
 def split_labels_out_of_latent(z):
     label = torch.unsqueeze(z[:, -args.n_label], dim=1)
@@ -106,5 +106,12 @@ class ImagePool():
                     return_images.append(tmp)
                 else:
                     return_images.append(image)
-        return_images = Variable(torch.cat(return_images, 0))
+        return_images = torch.cat(return_images, 0)
         return return_images
+
+def accumulate(model1, model2, decay=0.999):
+    par1 = dict(model1.named_parameters())
+    par2 = dict(model2.named_parameters())
+
+    for k in par1.keys():
+        par1[k].data.mul_(decay).add_(1 - decay, par2[k].data)
