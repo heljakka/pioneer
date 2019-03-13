@@ -4,9 +4,9 @@ import torch
 from torch import nn, optim
 import copy
 
-from src import config
-from src import utils
-from src.model import Generator, Discriminator, SpectralNormConv2d
+from pioneer import config
+from pioneer import utils
+from pioneer.model import Generator, Discriminator, SpectralNormConv2d
 
 args   = config.get_config()
 

@@ -7,8 +7,8 @@ from torch.autograd import Variable
 
 from math import sqrt
 
-from src import utils
-from src import config
+from pioneer import utils
+from pioneer import config
 
 args   = config.get_config()
 

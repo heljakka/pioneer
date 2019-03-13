@@ -8,7 +8,7 @@ import torch
 from torchvision import datasets, transforms, utils
 from torch.utils.data import DataLoader
 
-from src import config
+from pioneer import config
 
 args = config.get_config()
 

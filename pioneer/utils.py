@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Variable
 
-from src import config
+from pioneer import config
 import os
 import random
 

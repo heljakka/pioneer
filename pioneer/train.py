@@ -7,22 +7,22 @@ from torch import optim
 from torch.autograd import Variable, grad
 from torchvision import utils
 
-from src.model import Generator, Discriminator
+from pioneer.model import Generator, Discriminator
 
 from datetime import datetime
 import random
 
-from src import config
-from src import utils
-from src import data
-from src import evaluate
+from pioneer import config
+from pioneer import utils
+from pioneer import data
+from pioneer import evaluate
 
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
 
 from torch.nn import functional as F
 
-from src.sessions import Session
+from pioneer.sessions import Session
 
 args   = config.get_config()
 writer = None
