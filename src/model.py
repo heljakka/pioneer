@@ -219,15 +219,8 @@ class Generator(nn.Module):
                                      nn.Conv2d(int(nz/16), 3, 1),
                                      nn.Conv2d(int(nz/32), 3, 1)])
 
-    def forward(self, input, label, step=0, alpha=-1):
-#        import ipdb
-#        ipdb.set_trace()
-        
-        #input = self.code_norm(input)
-        # ARI: THis causes internal assertion failure. Maybe we don't need the embedding?
-        #label = self.label_embed(label)        
-        
-        out_act = lambda x: x #nn.Tanh()
+    def forward(self, input, label, step=0, alpha=-1):       
+        out_act = lambda x: x
 
         out = torch.cat([input, label], 1).unsqueeze(2).unsqueeze(3)
 
@@ -239,7 +232,7 @@ class Generator(nn.Module):
             else:
                 out = conv(out)
 
-            if i == step: # The final layer is ALWAYS either to_rgb layer, or a mixture of 2 to-rgb_layers!
+            if i == step: # The final layer is ALWAYS either to_rgb layer, or a mixture of 2 to-rgb_layers
                 out = out_act(to_rgb(out))
 
                 if i > 0 and 0 <= alpha < 1:
@@ -301,7 +294,7 @@ class Discriminator(nn.Module):
         if self.binary_predictor:
             self.linear = nn.Linear(nz, 1 + n_label)
     c = 0
-    def forward(self, input, step, alpha, use_ALQ): #default was step=0, alpha=-1
+    def forward(self, input, step, alpha, use_ALQ):
         for i in range(step, -1, -1):
             index = self.n_layer - i - 1
 
@@ -330,5 +323,5 @@ class Discriminator(nn.Module):
         else:
             if use_ALQ == 1:
                 print('Reserved for future use')
-            out = z_out.view(z_out.size(0), -1) #TODO: Is this needed?
+            out = z_out.view(z_out.size(0), -1)
             return utils.normalize(out)
