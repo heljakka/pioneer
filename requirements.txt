@@ -19,7 +19,7 @@ jedi==0.11.0
 mccabe==0.6.1
 murmurhash==0.26.4
 nltk==3.2.5
-numpy==1.13.3
+numpy==1.22.0
 olefile==0.44
 parso==0.1.1
 pathlib==1.0.1
